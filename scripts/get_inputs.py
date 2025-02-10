@@ -6,6 +6,10 @@ import sys
 import mmap
 from datetime import datetime
 import math
+from colorama import init, Fore, Back, Style
+
+# Initialiser colorama
+init()
 
 # Utiliser le dossier de session passé en variable d'environnement
 SESSION_DIR = os.environ.get('SESSION_DIR')
@@ -14,7 +18,7 @@ if not SESSION_DIR:
     sys.exit(1)
 
 # Chemin du fichier CSV pour enregistrer les données
-CSV_FILE = os.path.join(SESSION_DIR, "inputs.csv")
+CSV_FILE = os.environ.get('CSV_FILE') or os.path.join(SESSION_DIR, "inputs.csv")
 
 # Configuration
 START_TIME = None  # Pour le timestamp relatif
@@ -35,6 +39,12 @@ class SMElement:
         self.gas = struct.unpack('f', data[4:8])[0]             # Gas pedal position 0-1
         self.brake = struct.unpack('f', data[8:12])[0]          # Brake pedal position 0-1
         self.steer = struct.unpack('f', data[24:28])[0]
+        raw_gear = struct.unpack('i', data[16:20])[0]          # Gear: -1=R 0=N 1-6=1st-6th
+        # Correction des valeurs de gear
+        if raw_gear == 1:
+            self.gear = 6  # Si 1, c'est la 6ème
+        else:
+            self.gear = raw_gear - 1  # Pour les autres vitesses, on soustrait 2
 
 def read_shared_memory():
     try:
@@ -45,26 +55,27 @@ def read_shared_memory():
         physics = SMElement(data)
         current_time = time.time()
         
-        # Calcul précis du temps écoulé
+        # Calcul du numéro de frame
         elapsed_time = current_time - START_TIME
         frame_number = int(elapsed_time * 30)
         
         return {
-            "Timestamp": elapsed_time,
             "Frame": frame_number,
             "Steering": physics.steer,
             "Throttle": physics.gas,
             "Brake": physics.brake,
-            "SpeedKmh": physics.speedKmh
+            "SpeedKmh": physics.speedKmh,
+            "Gear": physics.gear
         }
     except Exception as e:
         print(f"Erreur : {e}")
         return None
 
-# Ajouter une petite pause après la création du fichier CSV pour s'assurer que tout est prêt
-with open(CSV_FILE, mode='w', newline='') as file:
-    writer = csv.writer(file)
-    writer.writerow(["Timestamp", "Frame", "Steering", "Throttle", "Brake", "SpeedKmh"])
+# Création du fichier CSV avec les en-têtes
+if not os.path.exists(CSV_FILE):
+    with open(CSV_FILE, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(['Frame', 'Steering', 'Throttle', 'Brake', 'SpeedKmh', 'Gear'])
 
 time.sleep(0.1)  # Petite pause pour s'assurer que le fichier est bien créé
 
@@ -83,22 +94,24 @@ try:
             with open(CSV_FILE, mode='a', newline='') as file:
                 writer = csv.writer(file)
                 writer.writerow([
-                    data["Timestamp"],
                     data["Frame"],
                     data["Steering"],
                     data["Throttle"],
                     data["Brake"],
-                    data["SpeedKmh"]
+                    data["SpeedKmh"],
+                    data["Gear"]
                 ])
             
-            print(f"\rVitesse: {data['SpeedKmh']:.1f} km/h | "
-                  f"Acc: {data['Throttle']:.2f} | "
-                  f"Frein: {data['Brake']:.2f} | "
-                  f"Volant: {data['Steering']:.2f}", end="")
+            # Affichage coloré des données avec ajout du gear
+            print(f"\r{Fore.CYAN}Vitesse: {Fore.YELLOW}{data['SpeedKmh']:.1f} km/h {Style.RESET_ALL}| "
+                  f"{Fore.GREEN}Acc: {data['Throttle']:.2f} {Style.RESET_ALL}| "
+                  f"{Fore.RED}Frein: {data['Brake']:.2f} {Style.RESET_ALL}| "
+                  f"{Fore.BLUE}Volant: {data['Steering']:.2f} {Style.RESET_ALL}| "
+                  f"{Fore.MAGENTA}Gear: {data['Gear']}{Style.RESET_ALL}", end="")
         
         sleep_time = max(0, SLEEP_TIME - (time.time() - current_time))
         time.sleep(sleep_time)
         last_sample_time = current_time
 
 except KeyboardInterrupt:
-    print(f"\nCapture des données arrêtée. Fichier sauvegardé dans : {CSV_FILE}")
+    print(f"\n{Fore.GREEN}Capture des données arrêtée. Fichier sauvegardé dans : {CSV_FILE}{Style.RESET_ALL}")
